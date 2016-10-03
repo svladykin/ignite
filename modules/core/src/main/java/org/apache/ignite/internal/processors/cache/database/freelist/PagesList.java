@@ -694,7 +694,7 @@ public abstract class PagesList extends DataStructure {
         List<ByteBuffer> lockedBufs = null;
 
         try {
-            while ((nextId = bag.pollFreePage()) != 0L) {
+            while ((nextId = bag.pollPage()) != 0L) {
                 int idx = io.addPage(prevBuf, nextId);
 
                 if (idx == -1) { // Attempt to add page failed: the node page is full.

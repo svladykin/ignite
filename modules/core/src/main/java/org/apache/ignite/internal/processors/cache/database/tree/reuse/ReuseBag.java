@@ -24,12 +24,12 @@ public interface ReuseBag {
     /**
      * @param pageId Free page ID for reuse.
      */
-    public void addFreePage(long pageId);
+    public void addPage(long pageId);
 
     /**
      * @return Free page ID for reuse or {@code 0} if empty.
      */
-    public long pollFreePage();
+    public long pollPage();
 
     /**
      * @return Number of pages in this bag.

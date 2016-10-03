@@ -44,7 +44,7 @@ public class BPlusTreeFakeReuseSelfTest extends BPlusTreeSelfTest {
         @Override public void addForRecycle(ReuseBag bag) throws IgniteCheckedException {
             long pageId;
 
-            while ((pageId = bag.pollFreePage()) != 0L)
+            while ((pageId = bag.pollPage()) != 0L)
                 deque.addFirst(pageId);
         }
 

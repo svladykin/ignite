@@ -67,16 +67,18 @@ public class ReuseBags {
          * @param pageId Page ID.
          */
         SinglePageBag(long pageId) {
+            assert pageId != 0L;
+
             this.pageId = pageId;
         }
 
         /** {@inheritDoc} */
-        @Override public void addFreePage(long pageId) {
+        @Override public void addPage(long pageId) {
             throw new IllegalStateException("Should never be called.");
         }
 
         /** {@inheritDoc} */
-        @Override public long pollFreePage() {
+        @Override public long pollPage() {
             long res = pageId;
 
             pageId = 0L;
@@ -117,12 +119,14 @@ public class ReuseBags {
         }
 
         /** {@inheritDoc} */
-        @Override public void addFreePage(long pageId) {
+        @Override public void addPage(long pageId) {
+            assert pageId != 0L;
+
             add(pageId);
         }
 
         /** {@inheritDoc} */
-        @Override public long pollFreePage() {
+        @Override public long pollPage() {
             return isEmpty() ? 0L : remove();
         }
     }

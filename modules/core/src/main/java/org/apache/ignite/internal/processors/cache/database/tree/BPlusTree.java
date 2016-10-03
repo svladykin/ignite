@@ -1589,7 +1589,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
 
                                 long fwdPageId = io.getForward(buf);
 
-                                bag.addFreePage(recyclePage(pageId, page, buf));
+                                bag.addPage(recyclePage(pageId, page, buf));
                                 pagesCnt++;
 
                                 pageId = fwdPageId;
@@ -1608,7 +1608,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
                     while (pageId != 0);
                 }
 
-                bag.addFreePage(recyclePage(metaPageId, meta, metaBuf));
+                bag.addPage(recyclePage(metaPageId, meta, metaBuf));
                 pagesCnt++;
             }
             finally {
@@ -2310,23 +2310,24 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         /**
          * @param pageId Page ID.
          */
-        private void addFreePageToBag(long pageId) {
+        private void addToReuseBag(long pageId) {
             assert pageId != 0;
 
             if (bag == null)
                 bag = singlePageBag(pageId);
             else {
                 if (isSinglePageBag(bag)) {
-                    long oldPageId = bag.pollFreePage();
+                    long oldPageId = bag.pollPage();
 
+                    assert oldPageId != 0L; // We should not poll pages.
                     assert bag.size() == 0;
 
                     bag = newBag(4);
 
-                    bag.addFreePage(oldPageId);
+                    bag.addPage(oldPageId);
                 }
 
-                bag.addFreePage(pageId);
+                bag.addPage(pageId);
             }
 
             assert bag.size() > 0: bag;
@@ -2909,7 +2910,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
             if (release)
                 writeUnlockAndClose(page, buf);
 
-            addFreePageToBag(pageId);
+            addToReuseBag(pageId);
         }
 
         /**
