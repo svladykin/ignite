@@ -30,6 +30,7 @@ import org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBag;
 import org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseList;
 import org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler;
 import org.apache.ignite.internal.processors.cache.database.tree.util.PageLockListener;
+import org.apache.ignite.internal.util.typedef.F;
 import org.apache.ignite.internal.util.typedef.internal.U;
 
 import static org.apache.ignite.internal.pagemem.PageIdAllocator.FLAG_DATA;
@@ -45,6 +46,9 @@ public abstract class DataStructure implements PageLockListener {
     public static Random rnd;
 
     /** */
+    private final String name;
+
+    /** */
     protected final int cacheId;
 
     /** */
@@ -57,20 +61,31 @@ public abstract class DataStructure implements PageLockListener {
     protected ReuseList reuseList;
 
     /**
+     * @param name Name.
      * @param cacheId Cache ID.
      * @param pageMem Page memory.
      * @param wal Write ahead log manager.
      */
     public DataStructure(
+        String name,
         int cacheId,
         PageMemory pageMem,
         IgniteWriteAheadLogManager wal
     ) {
         assert pageMem != null;
+        assert !F.isEmpty(name);
 
+        this.name = name;
         this.cacheId = cacheId;
         this.pageMem = pageMem;
         this.wal = wal;
+    }
+
+    /**
+     * @return Data structure name.
+     */
+    public final String getName() {
+        return name;
     }
 
     /**

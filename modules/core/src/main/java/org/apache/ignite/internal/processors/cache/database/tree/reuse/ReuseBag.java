@@ -30,4 +30,9 @@ public interface ReuseBag {
      * @return Free page ID for reuse or {@code 0} if empty.
      */
     public long pollFreePage();
+
+    /**
+     * @return Number of pages in this bag.
+     */
+    public int size();
 }

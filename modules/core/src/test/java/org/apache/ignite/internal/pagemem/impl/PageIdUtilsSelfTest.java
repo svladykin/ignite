@@ -124,7 +124,7 @@ public class PageIdUtilsSelfTest extends GridCommonAbstractTest {
         Random rnd = new Random();
 
         for (int i = 0; i < 50_000; i++) {
-            int off = rnd.nextInt(PageIdUtils.MAX_ITEMID_NUM + 1);
+            int off = rnd.nextInt(PageIdUtils.MAX_ITEM_ID + 1);
             int partId = rnd.nextInt(PageIdUtils.MAX_PART_ID + 1);
             int pageNum = rnd.nextInt();
 

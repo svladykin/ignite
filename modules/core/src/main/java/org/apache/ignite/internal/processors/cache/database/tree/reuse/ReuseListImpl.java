@@ -32,6 +32,7 @@ public class ReuseListImpl extends PagesList implements ReuseList {
         AtomicReferenceFieldUpdater.newUpdater(ReuseListImpl.class, Stripe[].class, "bucket");
 
     /** */
+    @SuppressWarnings("unused")
     private volatile Stripe[] bucket;
 
     /**
@@ -48,7 +49,8 @@ public class ReuseListImpl extends PagesList implements ReuseList {
         PageMemory pageMem,
         IgniteWriteAheadLogManager wal,
         long metaPageId,
-        boolean initNew) throws IgniteCheckedException {
+        boolean initNew
+    ) throws IgniteCheckedException {
         super(cacheId, name, pageMem, 1, wal, metaPageId);
 
         reuseList = this;
@@ -90,6 +92,6 @@ public class ReuseListImpl extends PagesList implements ReuseList {
 
     /** {@inheritDoc} */
     @Override public String toString() {
-        return "ReuseList [name=" + name + ']';
+        return "ReuseList [name=" + getName() + ']';
     }
 }

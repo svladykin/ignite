@@ -40,6 +40,7 @@ import org.apache.ignite.internal.util.typedef.internal.U;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.writePage;
 
 /**
+ * Free list.
  */
 public class FreeListImpl extends PagesList implements FreeList, ReuseList {
     /** */
@@ -240,9 +241,12 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
         ReuseList reuseList,
         IgniteWriteAheadLogManager wal,
         long metaPageId,
-        boolean initNew) throws IgniteCheckedException {
+        boolean initNew
+    ) throws IgniteCheckedException {
         super(cacheId, name, pageMem, BUCKETS, wal, metaPageId);
+
         this.reuseList = reuseList == null ? this : reuseList;
+
         int pageSize = pageMem.pageSize();
 
         assert U.isPow2(pageSize) : "Page size must be a power of 2: " + pageSize;
@@ -296,7 +300,7 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
     }
 
     /** {@inheritDoc} */
-    @Override public void insertDataRow(CacheDataRow row) throws IgniteCheckedException {
+    @Override public final void insertDataRow(CacheDataRow row) throws IgniteCheckedException {
         int rowSize = getRowSize(row);
 
         int written = 0;
@@ -333,63 +337,53 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
     }
 
     /** {@inheritDoc} */
-    @Override public void removeDataRowByLink(long link) throws IgniteCheckedException {
+    @Override public final void removeDataRowByLink(long link) throws IgniteCheckedException {
         assert link != 0;
 
-        long pageId = PageIdUtils.pageId(link);
-        int itemId = PageIdUtils.itemId(link);
-
-        long nextLink;
-
-        try (Page page = pageMem.page(cacheId, pageId)) {
-            nextLink = writePage(page, this, rmvRow, null, itemId, FAIL_L);
-
-            assert nextLink != FAIL_L; // Can't fail here.
-        }
-
-        while (nextLink != 0L) {
-            itemId = PageIdUtils.itemId(nextLink);
-            pageId = PageIdUtils.pageId(nextLink);
+        do {
+            int itemId = PageIdUtils.itemId(link);
+            long pageId = PageIdUtils.pageId(link);
 
             try (Page page = pageMem.page(cacheId, pageId)) {
-                nextLink = writePage(page, this, rmvRow, null, itemId, FAIL_L);
+                link = writePage(page, this, rmvRow, null, itemId, FAIL_L);
 
-                assert nextLink != FAIL_L; // Can't fail here.
+                assert link != FAIL_L; // Can't fail here.
             }
         }
+        while (link != 0L);
     }
 
     /** {@inheritDoc} */
-    @Override protected Stripe[] getBucket(int bucket) {
+    @Override protected final Stripe[] getBucket(int bucket) {
         return buckets.get(bucket);
     }
 
     /** {@inheritDoc} */
-    @Override protected boolean casBucket(int bucket, Stripe[] exp, Stripe[] upd) {
+    @Override protected final boolean casBucket(int bucket, Stripe[] exp, Stripe[] upd) {
         return buckets.compareAndSet(bucket, exp, upd);
     }
 
     /** {@inheritDoc} */
-    @Override protected boolean isReuseBucket(int bucket) {
+    @Override protected final boolean isReuseBucket(int bucket) {
         return bucket == REUSE_BUCKET;
     }
 
     /** {@inheritDoc} */
-    @Override public void addForRecycle(ReuseBag bag) throws IgniteCheckedException {
+    @Override public final void addForRecycle(ReuseBag bag) throws IgniteCheckedException {
         assert reuseList == this: "not allowed to be a reuse list";
 
         put(bag, null, null, REUSE_BUCKET);
     }
 
     /** {@inheritDoc} */
-    @Override public long takeRecycledPage() throws IgniteCheckedException {
+    @Override public final long takeRecycledPage() throws IgniteCheckedException {
         assert reuseList == this: "not allowed to be a reuse list";
 
         return takeEmptyPage(REUSE_BUCKET, null);
     }
 
     /** {@inheritDoc} */
-    @Override public long recycledPagesCount() throws IgniteCheckedException {
+    @Override public final long recycledPagesCount() throws IgniteCheckedException {
         assert reuseList == this: "not allowed to be a reuse list";
 
         return storedPagesCount(REUSE_BUCKET);
@@ -409,6 +403,6 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
 
     /** {@inheritDoc} */
     @Override public String toString() {
-        return "FreeList [name=" + name + ']';
+        return "FreeList [name=" + getName() + ']';
     }
 }

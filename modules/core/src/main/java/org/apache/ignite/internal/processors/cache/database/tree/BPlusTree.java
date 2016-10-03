@@ -17,7 +17,6 @@
 
 package org.apache.ignite.internal.processors.cache.database.tree;
 
-import java.io.Externalizable;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -59,7 +58,6 @@ import org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBag;
 import org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseList;
 import org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler;
 import org.apache.ignite.internal.util.GridArrays;
-import org.apache.ignite.internal.util.GridLongList;
 import org.apache.ignite.internal.util.lang.GridCursor;
 import org.apache.ignite.internal.util.lang.GridTreePrinter;
 import org.apache.ignite.internal.util.typedef.F;
@@ -77,6 +75,9 @@ import static org.apache.ignite.internal.processors.cache.database.tree.BPlusTre
 import static org.apache.ignite.internal.processors.cache.database.tree.BPlusTree.Result.NOT_FOUND;
 import static org.apache.ignite.internal.processors.cache.database.tree.BPlusTree.Result.RETRY;
 import static org.apache.ignite.internal.processors.cache.database.tree.BPlusTree.Result.RETRY_ROOT;
+import static org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBags.isSinglePageBag;
+import static org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBags.newBag;
+import static org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBags.singlePageBag;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.initPage;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.isWalDeltaRecordNeeded;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.readPage;
@@ -95,9 +96,6 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
 
     /** */
     private final AtomicBoolean destroyed = new AtomicBoolean(false);
-
-    /** */
-    private final String name;
 
     /** */
     private final float minFill;
@@ -595,7 +593,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         IOVersions<? extends BPlusInnerIO<L>> innerIos,
         IOVersions<? extends BPlusLeafIO<L>> leafIos
     ) throws IgniteCheckedException {
-        super(cacheId, pageMem, wal);
+        super(name, cacheId, pageMem, wal);
 
         assert !F.isEmpty(name);
 
@@ -611,16 +609,8 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         this.innerIos = innerIos;
         this.leafIos = leafIos;
         this.metaPageId = metaPageId;
-        this.name = name;
         this.reuseList = reuseList;
         this.globalRmvId = globalRmvId;
-    }
-
-    /**
-     * @return Tree name.
-     */
-    public final String getName() {
-        return name;
     }
 
     /**
@@ -1588,7 +1578,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         if (reuseList == null)
             return -1;
 
-        DestroyBag bag = new DestroyBag();
+        ReuseBag bag = newBag(32);
 
         long pagesCnt = 0;
 
@@ -1621,7 +1611,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
                         if (bag.size() == 128) {
                             reuseList.addForRecycle(bag);
 
-                            assert bag.isEmpty() : bag.size();
+                            assert bag.size() == 0 : bag.size();
                         }
                     }
                     while (pageId != 0);
@@ -2300,7 +2290,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
     /**
      * Remove operation.
      */
-    private final class Remove extends Get implements ReuseBag {
+    private final class Remove extends Get {
         /** */
         private boolean ceil;
 
@@ -2320,9 +2310,6 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         private Page page;
 
         /** */
-        private Object freePages;
-
-        /** */
         private ReuseBag bag;
 
         /**
@@ -2337,55 +2324,28 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         }
 
         /**
-         * @return Reuse bag.
+         * @param pageId Page ID.
          */
-        private ReuseBag bag() {
-            return bag != null ? bag : this;
-        }
-
-        /** {@inheritDoc} */
-        @SuppressWarnings("unchecked")
-        @Override public long pollFreePage() {
-            assert bag == null;
-
-            if (freePages == null)
-                return 0;
-
-            if (freePages.getClass() == GridLongList.class) {
-                GridLongList list = ((GridLongList)freePages);
-
-                return list.isEmpty() ? 0 : list.remove();
-            }
-
-            long res = (long)freePages;
-
-            freePages = null;
-
-            return res;
-        }
-
-        /** {@inheritDoc} */
-        @SuppressWarnings("unchecked")
-        @Override public void addFreePage(long pageId) {
+        private void addFreePageToBag(long pageId) {
             assert pageId != 0;
-            assert bag == null; // Otherwise we have to add the given pageId to that bag.
 
-            if (freePages == null)
-                freePages = pageId;
+            if (bag == null)
+                bag = singlePageBag(pageId);
             else {
-                GridLongList list;
+                if (isSinglePageBag(bag)) {
+                    long oldPageId = bag.pollFreePage();
 
-                if (freePages.getClass() == GridLongList.class)
-                    list = (GridLongList)freePages;
-                else {
-                    list = new GridLongList(4);
+                    assert bag.size() == 0;
 
-                    list.add((Long)freePages);
-                    freePages = list;
+                    bag = newBag(4);
+
+                    bag.addFreePage(oldPageId);
                 }
 
-                list.add(pageId);
+                bag.addFreePage(pageId);
             }
+
+            assert bag.size() > 0: bag;
         }
 
         /** {@inheritDoc} */
@@ -2965,7 +2925,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
             if (release)
                 writeUnlockAndClose(page, buf);
 
-            bag().addFreePage(pageId);
+            addFreePageToBag(pageId);
         }
 
         /**
@@ -2984,8 +2944,8 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         @SuppressWarnings("unchecked")
         private void reuseFreePages() throws IgniteCheckedException {
             // If we have a bag, then it will be processed at the upper level.
-            if (reuseList != null && bag == null && freePages != null)
-                reuseList.addForRecycle(this);
+            if (reuseList != null && bag != null)
+                reuseList.addForRecycle(bag);
         }
 
         /**
@@ -3731,31 +3691,6 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         /** {@inheritDoc} */
         @Override public final boolean releaseAfterWrite(Page page, G g, int lvl) {
             return g.canRelease(page, lvl);
-        }
-    }
-
-    /**
-     * Reuse bag for destroy.
-     */
-    protected static final class DestroyBag extends GridLongList implements ReuseBag {
-        /** */
-        private static final long serialVersionUID = 0L;
-
-        /**
-         * Default constructor for {@link Externalizable}.
-         */
-        public DestroyBag() {
-            // No-op.
-        }
-
-        /** {@inheritDoc} */
-        @Override public void addFreePage(long pageId) {
-            add(pageId);
-        }
-
-        /** {@inheritDoc} */
-        @Override public long pollFreePage() {
-            return isEmpty() ? 0 : remove();
         }
     }
 

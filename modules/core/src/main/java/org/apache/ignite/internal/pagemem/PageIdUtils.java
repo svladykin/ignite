@@ -55,8 +55,8 @@ public final class PageIdUtils {
     /** */
     private static final long PAGE_ID_MASK = ~(-1L << (PAGE_IDX_SIZE + PART_ID_SIZE + FLAG_SIZE));
 
-    /** Max itemid number. */
-    public static final int MAX_ITEMID_NUM = 0xFE;
+    /** Max item ID. */
+    public static final int MAX_ITEM_ID = 0xFE;
 
     /** Maximum page number. */
     public static final long MAX_PAGE_NUM = (1L << PAGE_IDX_SIZE) - 1;
@@ -79,7 +79,7 @@ public final class PageIdUtils {
      * @return Page link.
      */
     public static long link(long pageId, int itemId) {
-        assert itemId >= 0 && itemId <= MAX_ITEMID_NUM: itemId;
+        assert itemId >= 0 && itemId <= MAX_ITEM_ID : itemId;
         assert (pageId >> (FLAG_SIZE + PART_ID_SIZE + PAGE_IDX_SIZE)) == 0 : U.hexLong(pageId);
 
         return pageId | (((long)itemId) << (FLAG_SIZE + PART_ID_SIZE + PAGE_IDX_SIZE));

@@ -48,7 +48,6 @@ import org.apache.ignite.internal.processors.cache.database.tree.util.PageHandle
 import org.apache.ignite.internal.util.GridArrays;
 import org.apache.ignite.internal.util.GridLongList;
 import org.apache.ignite.internal.util.typedef.F;
-import org.apache.ignite.internal.util.typedef.internal.S;
 import org.apache.ignite.internal.util.typedef.internal.U;
 import org.jetbrains.annotations.Nullable;
 
@@ -57,6 +56,7 @@ import static java.lang.Boolean.TRUE;
 import static org.apache.ignite.internal.pagemem.PageIdAllocator.FLAG_DATA;
 import static org.apache.ignite.internal.pagemem.PageIdAllocator.FLAG_IDX;
 import static org.apache.ignite.internal.processors.cache.database.tree.io.PageIO.getPageId;
+import static org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBags.singlePageBag;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.initPage;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.isWalDeltaRecordNeeded;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.writePage;
@@ -79,9 +79,6 @@ public abstract class PagesList extends DataStructure {
 
     /** Number of buckets. */
     private final int buckets;
-
-    /** Name (for debug purposes). */
-    protected final String name;
 
     /** */
     private final PageHandler<Void, Boolean> cutTail = new PageHandler<Void, Boolean>() {
@@ -108,7 +105,7 @@ public abstract class PagesList extends DataStructure {
 
     /**
      * @param cacheId Cache ID.
-     * @param name Name (for debug purpose).
+     * @param name Name.
      * @param pageMem Page memory.
      * @param buckets Number of buckets.
      * @param wal Write ahead log manager.
@@ -123,11 +120,10 @@ public abstract class PagesList extends DataStructure {
         IgniteWriteAheadLogManager wal,
         long metaPageId
     ) throws IgniteCheckedException {
-        super(cacheId, pageMem, wal);
+        super(name, cacheId, pageMem, wal);
 
-        this.name = name;
         this.buckets = buckets;
-        this.metaPageId = metaPageId;
+        this.metaPageId = metaPageId; // May be 0 in tests.
     }
 
     /**
@@ -962,7 +958,7 @@ public abstract class PagesList extends DataStructure {
                 recycleId = merge(pageId, page, nextId, bucket);
 
             if (recycleId != 0L)
-                reuseList.addForRecycle(new SingletonReuseBag(recycleId));
+                reuseList.addForRecycle(singlePageBag(recycleId));
 
             return true;
         }
@@ -1160,40 +1156,6 @@ public abstract class PagesList extends DataStructure {
             wal.log(new RecycleRecord(cacheId, page.id(), pageId));
 
         return pageId;
-    }
-
-    /**
-     * Singleton reuse bag.
-     */
-    private static final class SingletonReuseBag implements ReuseBag {
-        /** */
-        long pageId;
-
-        /**
-         * @param pageId Page ID.
-         */
-        SingletonReuseBag(long pageId) {
-            this.pageId = pageId;
-        }
-
-        /** {@inheritDoc} */
-        @Override public void addFreePage(long pageId) {
-            throw new IllegalStateException("Should never be called.");
-        }
-
-        /** {@inheritDoc} */
-        @Override public long pollFreePage() {
-            long res = pageId;
-
-            pageId = 0L;
-
-            return res;
-        }
-
-        /** {@inheritDoc} */
-        @Override public String toString() {
-            return S.toString(SingletonReuseBag.class, this);
-        }
     }
 
     /**
