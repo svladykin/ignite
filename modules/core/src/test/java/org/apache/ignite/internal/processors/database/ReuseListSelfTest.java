@@ -46,13 +46,13 @@ import static org.apache.ignite.internal.processors.database.BPlusTreeSelfTest.P
  */
 public class ReuseListSelfTest extends GridCommonAbstractTest {
     /** */
-    private static final int CACHE_ID = 100500;
+    protected static final int CACHE_ID = 100500;
 
     /** */
     private PageMemory pageMem;
 
     /** */
-    private ReuseList reuseList;
+    protected ReuseList reuseList;
 
     /** {@inheritDoc} */
     @Override protected void beforeTest() throws Exception {
@@ -113,7 +113,7 @@ public class ReuseListSelfTest extends GridCommonAbstractTest {
      */
     protected ReuseList createReuseList(PageMemory pageMem)
         throws IgniteCheckedException {
-        return new ReuseListImpl(CACHE_ID, "reuse", pageMem, null, 0L, true);
+        return new ReuseListImpl(CACHE_ID, "test-reuse-list", pageMem, null, 0L, true);
     }
 
     /**

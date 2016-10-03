@@ -51,7 +51,7 @@ public interface CacheDataRow {
     public int partition();
 
     /**
-     * @return Link for this row.
+     * @return Link for this row or {@code 0L} if not set.
      */
     public long link();
 

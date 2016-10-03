@@ -701,6 +701,21 @@ public class DataPageIO extends PageIO {
         CacheDataRow row,
         int rowSize
     ) throws IgniteCheckedException {
+        addRow(buf, row, null, rowSize);
+    }
+
+    /**
+     * @param buf Buffer.
+     * @param row Cache data row.
+     * @param rowSize Row size.
+     * @throws IgniteCheckedException If failed.
+     */
+    private long addRow(
+        ByteBuffer buf,
+        CacheDataRow row,
+        byte[] payload,
+        int rowSize
+    ) throws IgniteCheckedException {
         assert rowSize <= getFreeSpace(buf): "can't call addRow if not enough space for the whole row";
 
         int fullEntrySize = getPageEntrySize(rowSize, SHOW_PAYLOAD_LEN | SHOW_ITEM);
@@ -710,35 +725,28 @@ public class DataPageIO extends PageIO {
 
         int dataOff = getDataOffsetForWrite(buf, fullEntrySize, directCnt, indirectCnt);
 
-        writeRowData(buf, dataOff, rowSize, row);
+        if (payload != null)
+            writeRowData(buf, dataOff, payload);
+        else
+            writeRowData(buf, dataOff, rowSize, row);
 
         int itemId = addItem(buf, fullEntrySize, directCnt, indirectCnt, dataOff);
 
-        setLink(row, buf, itemId);
+        return setLink(row, buf, itemId);
     }
 
     /**
      * Adds row to this data page and sets respective link to the given row object.
      *
      * @param buf Buffer.
+     * @return Link.
      * @throws IgniteCheckedException If failed.
      */
-    public void addRow(
+    public long addRow(
         ByteBuffer buf,
         byte[] payload
     ) throws IgniteCheckedException {
-        assert payload.length <= getFreeSpace(buf): "can't call addRow if not enough space for the whole row";
-
-        int fullEntrySize = getPageEntrySize(payload.length, SHOW_PAYLOAD_LEN | SHOW_ITEM);
-
-        int directCnt = getDirectCount(buf);
-        int indirectCnt = getIndirectCount(buf);
-
-        int dataOff = getDataOffsetForWrite(buf, fullEntrySize, directCnt, indirectCnt);
-
-        writeRowData(buf, dataOff, payload);
-
-        addItem(buf, fullEntrySize, directCnt, indirectCnt, dataOff);
+        return addRow(buf, null, payload, payload.length);
     }
 
     /**
@@ -826,7 +834,21 @@ public class DataPageIO extends PageIO {
         int written,
         int rowSize
     ) throws IgniteCheckedException {
-        return addRowFragment(buf, written, rowSize, row.link(), row, null);
+        int payloadSize = payloadSize(buf, written, rowSize);
+
+        addRowFragment(buf, written, rowSize, row.link(), row, null, payloadSize);
+
+        return payloadSize;
+    }
+
+    /**
+     * @param buf Page buffer.
+     * @param written Number of bytes of row size that was already written.
+     * @param rowSize Row size.
+     * @return Payload size.
+     */
+    public int payloadSize(ByteBuffer buf, int written, int rowSize) {
+        return Math.min(rowSize - written, getFreeSpace(buf));
     }
 
     /**
@@ -835,14 +857,15 @@ public class DataPageIO extends PageIO {
      * @param buf Byte buffer.
      * @param payload Payload bytes.
      * @param lastLink Link to the previous written fragment (link to the tail).
+     * @return Link.
      * @throws IgniteCheckedException If failed.
      */
-    public void addRowFragment(
+    public long addRowFragment(
         ByteBuffer buf,
         byte[] payload,
         long lastLink
     ) throws IgniteCheckedException {
-        addRowFragment(buf, 0, 0, lastLink, null, payload);
+        return addRowFragment(buf, 0, 0, lastLink, null, payload, payload.length);
     }
 
     /**
@@ -854,24 +877,22 @@ public class DataPageIO extends PageIO {
      * @param lastLink Link to the previous written fragment (link to the tail).
      * @param row Row.
      * @param payload Payload bytes.
-     * @return Written payload size.
+     * @return Link.
      * @throws IgniteCheckedException If failed.
      */
-    private int addRowFragment(
+    private long addRowFragment(
         ByteBuffer buf,
         int written,
         int rowSize,
         long lastLink,
         CacheDataRow row,
-        byte[] payload
+        byte[] payload,
+        int payloadSize
     ) throws IgniteCheckedException {
         assert payload == null ^ row == null;
 
         int directCnt = getDirectCount(buf);
         int indirectCnt = getIndirectCount(buf);
-
-        int payloadSize = payload != null ? payload.length :
-            Math.min(rowSize - written, getFreeSpace(buf));
 
         int fullEntrySize = getPageEntrySize(payloadSize, SHOW_PAYLOAD_LEN | SHOW_LINK | SHOW_ITEM);
         int dataOff = getDataOffsetForWrite(buf, fullEntrySize, directCnt, indirectCnt);
@@ -896,19 +917,24 @@ public class DataPageIO extends PageIO {
 
         int itemId = addItem(buf, fullEntrySize, directCnt, indirectCnt, dataOff);
 
-        if (row != null)
-            setLink(row, buf, itemId);
-
-        return payloadSize;
+        return setLink(row, buf, itemId);
     }
 
     /**
      * @param row Row to set link to.
      * @param buf Page buffer.
      * @param itemId Item ID.
+     * @return Link.
      */
-    private void setLink(CacheDataRow row, ByteBuffer buf, int itemId) {
-        row.link(PageIdUtils.link(getPageId(buf), itemId));
+    private long setLink(CacheDataRow row, ByteBuffer buf, int itemId) {
+        assert checkIndex(itemId): itemId;
+
+        long link = PageIdUtils.link(getPageId(buf), itemId);
+
+        if (row != null)
+            row.link(link);
+
+        return link;
     }
 
     /**
