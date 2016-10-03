@@ -72,7 +72,7 @@ public class ReuseListImpl extends PagesList implements ReuseList {
 
     /** {@inheritDoc} */
     @Override public long pollRecycledPage() throws IgniteCheckedException {
-        return pollEmptyPage(0, null);
+        return pollPageFromBucket(0, false);
     }
 
     /** {@inheritDoc} */

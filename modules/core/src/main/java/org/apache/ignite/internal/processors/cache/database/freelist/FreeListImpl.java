@@ -315,7 +315,7 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
 
             // TODO: properly handle reuse bucket.
             for (int b = bucket; b < BUCKETS - 1; b++) {
-                pageId = pollEmptyPage(b, DataPageIO.VERSIONS);
+                pageId = pollPageFromBucket(b, true);
 
                 if (pageId != 0L) {
                     reuseBucket = isReuseBucket(b);
@@ -370,21 +370,21 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
 
     /** {@inheritDoc} */
     @Override public final void addForRecycle(ReuseBag bag) throws IgniteCheckedException {
-        assert reuseList == this: "not allowed to be a reuse list";
+        assert reuseList == this;
 
         put(bag, null, null, REUSE_BUCKET);
     }
 
     /** {@inheritDoc} */
     @Override public final long pollRecycledPage() throws IgniteCheckedException {
-        assert reuseList == this: "not allowed to be a reuse list";
+        assert reuseList == this;
 
-        return pollEmptyPage(REUSE_BUCKET, null);
+        return pollPageFromBucket(REUSE_BUCKET, false);
     }
 
     /** {@inheritDoc} */
     @Override public final long recycledPagesCount() throws IgniteCheckedException {
-        assert reuseList == this: "not allowed to be a reuse list";
+        assert reuseList == this;
 
         return storedPagesCount(REUSE_BUCKET);
     }

@@ -41,7 +41,6 @@ import org.apache.ignite.internal.processors.cache.database.DataStructure;
 import org.apache.ignite.internal.processors.cache.database.freelist.io.PagesListMetaIO;
 import org.apache.ignite.internal.processors.cache.database.freelist.io.PagesListNodeIO;
 import org.apache.ignite.internal.processors.cache.database.tree.io.DataPageIO;
-import org.apache.ignite.internal.processors.cache.database.tree.io.IOVersions;
 import org.apache.ignite.internal.processors.cache.database.tree.io.PageIO;
 import org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBag;
 import org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler;
@@ -320,6 +319,8 @@ public abstract class PagesList extends DataStructure {
         io.initNewPage(next, nextId);
         io.setPreviousId(next, prevId);
 
+        assert io.getNextId(next) == 0L;
+
         io.setNextId(prev, nextId);
     }
 
@@ -445,7 +446,7 @@ public abstract class PagesList extends DataStructure {
      * !!! For tests only, does not provide any correctness guarantees for concurrent access.
      *
      * @param bucket Bucket index.
-     * @return Number of pages stored in this list.
+     * @return Number of pages stored in this bucket.
      * @throws IgniteCheckedException If failed.
      */
     protected final long storedPagesCount(int bucket) throws IgniteCheckedException {
@@ -457,20 +458,28 @@ public abstract class PagesList extends DataStructure {
             for (Stripe tail : tails) {
                 long pageId = tail.tailId;
 
-                try (Page page = page(pageId)) {
-                    ByteBuffer buf = readLock(page); // No correctness guaranties.
+                while (pageId != 0L) {
+                    try (Page page = page(pageId)) {
+                        ByteBuffer buf = readLock(page); // No correctness guaranties.
 
-                    try {
-                        PagesListNodeIO io = PagesListNodeIO.VERSIONS.forPage(buf);
+                        try {
+                            PagesListNodeIO io = PagesListNodeIO.VERSIONS.forPage(buf);
 
-                        int cnt = io.getCount(buf);
+                            int cnt = io.getCount(buf);
 
-                        assert cnt >= 0;
+                            assert cnt >= 0;
 
-                        res += cnt;
-                    }
-                    finally {
-                        readUnlock(page, buf);
+                            res += cnt;
+
+                            pageId = io.getPreviousId(buf);
+
+                            // The current page itself is reusable index page, except the head.
+                            if (pageId != 0L)
+                                res++;
+                        }
+                        finally {
+                            readUnlock(page, buf);
+                        }
                     }
                 }
             }
@@ -738,7 +747,7 @@ public abstract class PagesList extends DataStructure {
                     }
                 }
                 else {
-                    // TODO: use single WAL record for bag?
+                    // TODO: use a single WAL record for multiple pages from bag?
                     if (isWalDeltaRecordNeeded(wal, page))
                         wal.log(new PagesListAddPageRecord(cacheId, pageId, nextId));
                 }
@@ -800,11 +809,12 @@ public abstract class PagesList extends DataStructure {
 
     /**
      * @param bucket Bucket index.
-     * @param initIoVers Optional IO to initialize page.
+     * @param dataPage We need to init a data page.
      * @return Removed page ID or {@code 0L} if none.
      * @throws IgniteCheckedException If failed.
      */
-    protected final long pollEmptyPage(int bucket, @Nullable IOVersions initIoVers) throws IgniteCheckedException {
+    protected final long pollPageFromBucket(int bucket, boolean dataPage)
+        throws IgniteCheckedException {
         int lockAttempt = 0;
 
         for (;;) {
@@ -826,8 +836,8 @@ public abstract class PagesList extends DataStructure {
                 try {
                     PagesListNodeIO io = PagesListNodeIO.VERSIONS.forPage(tailBuf);
 
-                    if (io.getNextId(tailBuf) != 0)
-                        continue;
+                    if (io.getNextId(tailBuf) != 0) // TODO May be optimistically try to take page here?
+                        continue; // Splitted.
 
                     long pageId = io.takeAnyPage(tailBuf);
 
@@ -851,10 +861,11 @@ public abstract class PagesList extends DataStructure {
                             assert ok == TRUE: ok;
                         }
 
-                        if (initIoVers != null) {
+                        if (dataPage) {
+                            // Setting up a new data page.
                             tailId = PageIdUtils.changeType(tailId, FLAG_DATA);
 
-                            PageIO initIo = initIoVers.latest();
+                            PageIO initIo = DataPageIO.VERSIONS.latest();
 
                             initIo.initNewPage(tailBuf, tailId);
 
@@ -864,6 +875,7 @@ public abstract class PagesList extends DataStructure {
                             }
                         }
                         else {
+                            // Rotate index page.
                             tailId = PageIdUtils.rotatePageId(tailId);
 
                             PageIO.setPageId(tailBuf, tailId);
@@ -879,8 +891,7 @@ public abstract class PagesList extends DataStructure {
 
                     // If we do not have a previous page (we are at head), then we still can return
                     // current page but we have to drop the whole stripe. Since it is a reuse bucket,
-                    // we will not do that, but just return 0L, because this may produce contention on
-                    // meta page.
+                    // we will not do that, but just return 0L, because this may cause contention.
 
                     return 0L;
                 }
