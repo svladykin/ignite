@@ -18,6 +18,7 @@
 package org.apache.ignite.internal.processors.database;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -1312,16 +1313,20 @@ public class BPlusTreeSelfTest extends GridCommonAbstractTest {
             for (Map.Entry<Object,Map<Long,Long>> entry : locks.entrySet()) {
                 Object thId = entry.getKey();
 
-                b.a(" ## " + thId);
-
                 Long z = beforeLock.get(thId);
+                Collection<Map.Entry<Long,Long>> locked = new ArrayList<>(entry.getValue().entrySet());
+
+                if (z == null && locked.isEmpty())
+                    continue;
+
+                b.a(" ## " + thId);
 
                 if (z != null)
                     b.a("   --> ").appendHex(z).a("  (").appendHex(effectivePageId(z)).a(')');
 
                 b.a('\n');
 
-                for (Map.Entry<Long,Long> x : entry.getValue().entrySet())
+                for (Map.Entry<Long,Long> x : locked)
                     b.a(" -  ").appendHex(x.getValue()).a("  (").appendHex(x.getKey()).a(")\n");
 
                 b.a('\n');
