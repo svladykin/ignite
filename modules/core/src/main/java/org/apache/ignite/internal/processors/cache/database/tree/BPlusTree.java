@@ -628,7 +628,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
      */
     protected final void initNew() throws IgniteCheckedException {
         // Allocate the first leaf page, it will be our root.
-        long rootId = allocatePage(null);
+        long rootId = allocatePage();
 
         try (Page root = page(rootId)) {
             initPage(root, this, latestLeafIO(), wal);
@@ -1227,14 +1227,16 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
     }
 
     /**
+     * Best effort attempt to remove ceiling row, it means that it may fail even
+     * if the tree contains ceiling rows.
+     *
      * @param row Lookup row.
-     * @param bag Reuse bag.
      * @return Removed row.
      * @throws IgniteCheckedException If failed.
      */
     @SuppressWarnings("unused")
-    public final T removeCeil(L row, ReuseBag bag) throws IgniteCheckedException {
-        return doRemove(row, true, bag);
+    public final T removeCeil(L row) throws IgniteCheckedException {
+        return doRemove(row, true);
     }
 
     /**
@@ -1243,20 +1245,19 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
      * @throws IgniteCheckedException If failed.
      */
     public final T remove(L row) throws IgniteCheckedException {
-        return doRemove(row, false, null);
+        return doRemove(row, false);
     }
 
     /**
      * @param row Lookup row.
      * @param ceil If we can remove ceil row when we can not find exact.
-     * @param bag Reuse bag.
      * @return Removed row.
      * @throws IgniteCheckedException If failed.
      */
-    private T doRemove(L row, boolean ceil, ReuseBag bag) throws IgniteCheckedException {
+    private T doRemove(L row, boolean ceil) throws IgniteCheckedException {
         checkDestroyed();
 
-        Remove r = new Remove(row, ceil, bag);
+        Remove r = new Remove(row, ceil);
 
         try {
             for (;;) {
@@ -1501,19 +1502,9 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
      * @throws IgniteCheckedException If failed.
      */
     public final T put(T row) throws IgniteCheckedException {
-        return put(row, null);
-    }
-
-    /**
-     * @param row Row.
-     * @param bag Reuse bag.
-     * @return Old row.
-     * @throws IgniteCheckedException If failed.
-     */
-    public final T put(T row, ReuseBag bag) throws IgniteCheckedException {
         checkDestroyed();
 
-        Put p = new Put(row, bag);
+        Put p = new Put(row);
 
         try {
             for (;;) { // Go down with retries.
@@ -2077,17 +2068,11 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         /** */
         Bool needReplaceInner = FALSE;
 
-        /** */
-        private ReuseBag bag;
-
         /**
          * @param row Row.
-         * @param bag Reuse bag.
          */
-        private Put(T row, ReuseBag bag) {
+        private Put(T row) {
             super(row);
-
-            this.bag = bag;
         }
 
         /** {@inheritDoc} */
@@ -2196,7 +2181,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
          */
         private L insertWithSplit(Page page, BPlusIO<L> io, final ByteBuffer buf, int idx, int lvl)
             throws IgniteCheckedException {
-            long fwdId = allocatePage(bag);
+            long fwdId = allocatePage();
 
             try (Page fwd = page(fwdId)) {
                 // Need to check this before the actual split, because after the split we will have new forward page here.
@@ -2243,7 +2228,7 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
                     }
 
                     if (!hadFwd && lvl == getRootLevel(meta)) { // We are splitting root.
-                        long newRootId = allocatePage(bag);
+                        long newRootId = allocatePage();
 
                         try (Page newRoot = page(newRootId)) {
                             if (io.isLeaf())
@@ -2316,11 +2301,10 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
          * @param row Row.
          * @param ceil If we can remove ceil row when we can not find exact.
          */
-        private Remove(L row, boolean ceil, ReuseBag bag) {
+        private Remove(L row, boolean ceil) {
             super(row);
 
             this.ceil = ceil;
-            this.bag = bag;
         }
 
         /**

@@ -49,7 +49,7 @@ public class BPlusTreeFakeReuseSelfTest extends BPlusTreeSelfTest {
         }
 
         /** {@inheritDoc} */
-        @Override public long takeRecycledPage() throws IgniteCheckedException {
+        @Override public long pollRecycledPage() throws IgniteCheckedException {
             Long pageId = deque.pollFirst();
 
             return pageId == null ? 0L : pageId;

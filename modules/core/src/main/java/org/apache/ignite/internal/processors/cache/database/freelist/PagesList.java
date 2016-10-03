@@ -331,7 +331,7 @@ public abstract class PagesList extends DataStructure {
      * @return Tail page ID.
      */
     private Stripe addStripe(int bucket, boolean reuse) throws IgniteCheckedException {
-        long pageId = reuse ? allocatePage(null) : allocatePageNoReuse();
+        long pageId = reuse ? allocatePage() : allocatePageNoReuse();
 
         try (Page page = page(pageId)) {
             initPage(page, this, PagesListNodeIO.VERSIONS.latest(), wal);
@@ -619,7 +619,7 @@ public abstract class PagesList extends DataStructure {
         }
         else {
             // Just allocate a new node page and add our data page there.
-            long nextId = allocatePage(null);
+            long nextId = allocatePage();
 
             try (Page next = page(nextId)) {
                 ByteBuffer nextBuf = writeLock(next); // Newly allocated page.
@@ -762,7 +762,7 @@ public abstract class PagesList extends DataStructure {
      * @param bucket Bucket index.
      * @return Page for take.
      */
-    private Stripe getPageForTake(int bucket) {
+    private Stripe getPageForPoll(int bucket) {
         Stripe[] tails = getBucket(bucket);
 
         if (tails == null)
@@ -801,14 +801,14 @@ public abstract class PagesList extends DataStructure {
     /**
      * @param bucket Bucket index.
      * @param initIoVers Optional IO to initialize page.
-     * @return Removed page ID.
+     * @return Removed page ID or {@code 0L} if none.
      * @throws IgniteCheckedException If failed.
      */
-    protected final long takeEmptyPage(int bucket, @Nullable IOVersions initIoVers) throws IgniteCheckedException {
+    protected final long pollEmptyPage(int bucket, @Nullable IOVersions initIoVers) throws IgniteCheckedException {
         int lockAttempt = 0;
 
         for (;;) {
-            Stripe stripe = getPageForTake(bucket);
+            Stripe stripe = getPageForPoll(bucket);
 
             if (stripe == null)
                 return 0L;

@@ -26,7 +26,6 @@ import org.apache.ignite.internal.pagemem.PageIdAllocator;
 import org.apache.ignite.internal.pagemem.PageIdUtils;
 import org.apache.ignite.internal.pagemem.PageMemory;
 import org.apache.ignite.internal.pagemem.wal.IgniteWriteAheadLogManager;
-import org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBag;
 import org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseList;
 import org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler;
 import org.apache.ignite.internal.processors.cache.database.tree.util.PageLockListener;
@@ -106,17 +105,16 @@ public abstract class DataStructure implements PageLockListener {
     }
 
     /**
-     * @param bag Reuse bag.
      * @return Allocated page.
      * @throws IgniteCheckedException If failed.
      */
-    protected final long allocatePage(ReuseBag bag) throws IgniteCheckedException {
-        long pageId = bag != null ? bag.pollFreePage() : 0;
+    protected final long allocatePage() throws IgniteCheckedException {
+        long pageId = 0L;
 
-        if (pageId == 0 && reuseList != null)
-            pageId = reuseList.takeRecycledPage();
+        if (reuseList != null)
+            pageId = reuseList.pollRecycledPage();
 
-        if (pageId == 0)
+        if (pageId == 0L)
             pageId = allocatePageNoReuse();
 
         assert pageId != 0;
