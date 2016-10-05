@@ -29,7 +29,6 @@ import org.apache.ignite.IgniteCheckedException;
 import org.apache.ignite.IgniteException;
 import org.apache.ignite.internal.IgniteInterruptedCheckedException;
 import org.apache.ignite.internal.pagemem.Page;
-import org.apache.ignite.internal.pagemem.PageIdUtils;
 import org.apache.ignite.internal.pagemem.PageMemory;
 import org.apache.ignite.internal.pagemem.wal.IgniteWriteAheadLogManager;
 import org.apache.ignite.internal.pagemem.wal.record.delta.FixCountRecord;
@@ -42,7 +41,6 @@ import org.apache.ignite.internal.pagemem.wal.record.delta.MetaPageAddRootRecord
 import org.apache.ignite.internal.pagemem.wal.record.delta.MetaPageCutRootRecord;
 import org.apache.ignite.internal.pagemem.wal.record.delta.MetaPageInitRootRecord;
 import org.apache.ignite.internal.pagemem.wal.record.delta.NewRootInitRecord;
-import org.apache.ignite.internal.pagemem.wal.record.delta.RecycleRecord;
 import org.apache.ignite.internal.pagemem.wal.record.delta.RemoveRecord;
 import org.apache.ignite.internal.pagemem.wal.record.delta.ReplaceRecord;
 import org.apache.ignite.internal.pagemem.wal.record.delta.SplitExistingPageRecord;
@@ -79,7 +77,6 @@ import static org.apache.ignite.internal.processors.cache.database.tree.reuse.Re
 import static org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBags.newBag;
 import static org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBags.singlePageBag;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.initPage;
-import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.isWalDeltaRecordNeeded;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.readPage;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.writePage;
 
@@ -614,14 +611,6 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
     }
 
     /**
-     * @param page Updated page.
-     * @return {@code true} If we need to make a delta WAL record for the change in this page.
-     */
-    private boolean needWalDeltaRecord(Page page) {
-        return isWalDeltaRecordNeeded(wal, page);
-    }
-
-    /**
      * Initialize new index.
      *
      * @throws IgniteCheckedException If failed.
@@ -636,7 +625,8 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
 
         // Initialize meta page with new root page.
         try (Page meta = page(metaPageId)) {
-            Bool res = writePage(meta, this, initRoot, BPlusMetaIO.VERSIONS.latest(), wal, rootId, 0, FALSE);
+            Bool res = writePage(metaPageId, meta, this, initRoot,
+                BPlusMetaIO.VERSIONS.latest(), wal, rootId, 0, FALSE);
 
             assert res == TRUE: res;
         }
@@ -1644,26 +1634,6 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
         }
 
         return result;
-    }
-
-    /**
-     * @param pageId Page ID.
-     * @param page Page.
-     * @param buf Buffer.
-     * @return Recycled page ID.
-     * @throws IgniteCheckedException If failed.
-     */
-    private long recyclePage(long pageId, Page page, ByteBuffer buf) throws IgniteCheckedException {
-        // Rotate page ID to avoid concurrency issues with reused pages.
-        pageId = PageIdUtils.rotatePageId(pageId);
-
-        // Update page ID inside of the buffer, Page.id() will always return the original page ID.
-        PageIO.setPageId(buf, pageId);
-
-        if (needWalDeltaRecord(page))
-            wal.log(new RecycleRecord(cacheId, page.id(), pageId));
-
-        return pageId;
     }
 
     /**
@@ -2900,12 +2870,9 @@ public abstract class BPlusTree<L, T extends L> extends DataStructure {
             throws IgniteCheckedException {
             long pageId = page.id();
 
-            long effectivePageId = PageIdUtils.effectivePageId(pageId);
+            assert PageIO.getPageId(buf) == pageId;
 
             pageId = recyclePage(pageId, page, buf);
-
-            if (effectivePageId != PageIdUtils.effectivePageId(pageId))
-                throw new IllegalStateException("Effective page ID must stay the same.");
 
             if (release)
                 writeUnlockAndClose(page, buf);

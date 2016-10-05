@@ -102,7 +102,7 @@ public final class PageIdUtils {
      * @return Page ID.
      */
     public static long pageId(long link) {
-        return flag(link) == PageIdAllocator.FLAG_IDX? link : link & PAGE_ID_MASK;
+        return link & PAGE_ID_MASK;
     }
 
     /**
@@ -112,7 +112,6 @@ public final class PageIdUtils {
     public static long effectivePageId(long link) {
         return link & EFFECTIVE_PAGE_ID_MASK;
     }
-
 
     /**
      * Index of the item inside of data page.
@@ -133,6 +132,8 @@ public final class PageIdUtils {
 
         pageId = (pageId << PART_ID_SIZE) | (partId & PART_ID_MASK);
         pageId = (pageId << (PAGE_IDX_SIZE)) | (pageIdx & PAGE_IDX_MASK);
+
+        assert itemId(pageId) == 0;
 
         return pageId;
     }

@@ -112,7 +112,7 @@ public abstract class PageHandler<X, R> {
         int intArg,
         R lockFailed
     ) throws IgniteCheckedException {
-        return writePage(page, lockListener, h, null, null, arg, intArg, lockFailed);
+        return writePage(page.id(), page, lockListener, h, null, null, arg, intArg, lockFailed);
     }
 
     /**
@@ -127,7 +127,7 @@ public abstract class PageHandler<X, R> {
         PageIO init,
         IgniteWriteAheadLogManager wal
     ) throws IgniteCheckedException {
-        Boolean res = writePage(page, lockListener, NOOP, init, wal, null, 0, FALSE);
+        Boolean res = writePage(page.id(), page, lockListener, NOOP, init, wal, null, 0, FALSE);
 
         assert res == TRUE: res; // It must be newly allocated page, can't be recycled.
     }
@@ -187,6 +187,7 @@ public abstract class PageHandler<X, R> {
     }
 
     /**
+     * @param pageId Page ID to setup.
      * @param page Page.
      * @param lockListener Lock listener.
      * @param h Handler.
@@ -198,6 +199,7 @@ public abstract class PageHandler<X, R> {
      * @throws IgniteCheckedException If failed.
      */
     public static <X, R> R writePage(
+        long pageId,
         Page page,
         PageLockListener lockListener,
         PageHandler<X, R> h,
@@ -218,7 +220,7 @@ public abstract class PageHandler<X, R> {
 
         try {
             if (init != null) // It is a new page and we have to initialize it.
-                doInitPage(page, buf, init, wal);
+                doInitPage(pageId, page, buf, init, wal);
             else
                 init = PageIO.getPageIO(buf);
 
@@ -237,6 +239,7 @@ public abstract class PageHandler<X, R> {
     }
 
     /**
+     * @param pageId Page ID.
      * @param page Page.
      * @param buf Buffer.
      * @param init Initial IO.
@@ -244,14 +247,13 @@ public abstract class PageHandler<X, R> {
      * @throws IgniteCheckedException If failed.
      */
     private static void doInitPage(
+        long pageId,
         Page page,
         ByteBuffer buf,
         PageIO init,
         IgniteWriteAheadLogManager wal
     ) throws IgniteCheckedException {
         assert PageIO.getCrc(buf) == 0; //TODO GG-11480
-
-        long pageId = page.id();
 
         init.initNewPage(buf, pageId);
 

@@ -26,16 +26,15 @@ import org.apache.ignite.internal.pagemem.PageIdAllocator;
 import org.apache.ignite.internal.pagemem.PageIdUtils;
 import org.apache.ignite.internal.pagemem.PageMemory;
 import org.apache.ignite.internal.pagemem.wal.IgniteWriteAheadLogManager;
+import org.apache.ignite.internal.pagemem.wal.record.delta.RecycleRecord;
+import org.apache.ignite.internal.processors.cache.database.tree.io.PageIO;
 import org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseList;
 import org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler;
 import org.apache.ignite.internal.processors.cache.database.tree.util.PageLockListener;
 import org.apache.ignite.internal.util.typedef.F;
-import org.apache.ignite.internal.util.typedef.internal.U;
 
-import static org.apache.ignite.internal.pagemem.PageIdAllocator.FLAG_DATA;
 import static org.apache.ignite.internal.pagemem.PageIdAllocator.FLAG_IDX;
-import static org.apache.ignite.internal.pagemem.PageIdAllocator.INDEX_PARTITION;
-import static org.apache.ignite.internal.pagemem.PageIdAllocator.MAX_PARTITION_ID;
+import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.isWalDeltaRecordNeeded;
 
 /**
  * Base class for all the data structures based on {@link PageMemory}.
@@ -136,12 +135,35 @@ public abstract class DataStructure implements PageLockListener {
      * @throws IgniteCheckedException If failed.
      */
     protected final Page page(long pageId) throws IgniteCheckedException {
-        byte flag = PageIdUtils.flag(pageId);
-
-        assert flag == FLAG_IDX && PageIdUtils.partId(pageId) == INDEX_PARTITION ||
-            flag == FLAG_DATA && PageIdUtils.partId(pageId) <= MAX_PARTITION_ID : U.hexLong(pageId);
-
         return pageMem.page(cacheId, pageId);
+    }
+
+    /**
+     * @param page Updated page.
+     * @return {@code true} If we need to make a delta WAL record for the change in this page.
+     */
+    protected final boolean needWalDeltaRecord(Page page) {
+        return isWalDeltaRecordNeeded(wal, page);
+    }
+
+    /**
+     * @param pageId Page ID.
+     * @param page Page.
+     * @param buf Buffer.
+     * @return Recycled page ID.
+     * @throws IgniteCheckedException If failed.
+     */
+    protected final long recyclePage(long pageId, Page page, ByteBuffer buf) throws IgniteCheckedException {
+        // Rotate page ID to avoid concurrency issues with reused pages.
+        pageId = PageIdUtils.rotatePageId(pageId);
+
+        // Update page ID inside of the buffer, Page.id() will always return the original page ID.
+        PageIO.setPageId(buf, pageId);
+
+        if (needWalDeltaRecord(page))
+            wal.log(new RecycleRecord(cacheId, page.id(), pageId));
+
+        return pageId;
     }
 
     /**

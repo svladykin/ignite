@@ -56,7 +56,7 @@ public class FreeListSelfTest extends ReuseListSelfTest {
 
                     freeList().insertDataRow(row);
 
-                    assertTrue(row.link != 0L);
+                    assertTrue("i: " + i, row.link != 0L);
                     assertNull(rows.put(row.link, row));
 
                     break;

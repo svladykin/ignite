@@ -57,7 +57,6 @@ import static org.apache.ignite.internal.pagemem.PageIdAllocator.FLAG_IDX;
 import static org.apache.ignite.internal.processors.cache.database.tree.io.PageIO.getPageId;
 import static org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseBags.singlePageBag;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.initPage;
-import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.isWalDeltaRecordNeeded;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.writePage;
 
 /**
@@ -93,7 +92,7 @@ public abstract class PagesList extends DataStructure {
 
             io.setNextId(buf, 0L);
 
-            if (isWalDeltaRecordNeeded(wal, page))
+            if (needWalDeltaRecord(page))
                 wal.log(new PagesListSetNextRecord(cacheId, page.id(), 0L));
 
             updateTail(bucket, tailId, page.id());
@@ -313,7 +312,13 @@ public abstract class PagesList extends DataStructure {
      * @param nextId Next page ID.
      * @param next Next page buffer.
      */
-    private void setupNextPage(PagesListNodeIO io, long prevId, ByteBuffer prev, long nextId, ByteBuffer next) {
+    private void setupNextPage(
+        PagesListNodeIO io,
+        long prevId,
+        ByteBuffer prev,
+        long nextId,
+        ByteBuffer next
+    ) {
         assert io.getNextId(prev) == 0L;
 
         io.initNewPage(next, nextId);
@@ -557,24 +562,41 @@ public abstract class PagesList extends DataStructure {
         ByteBuffer dataPageBuf,
         int bucket
     ) throws IgniteCheckedException {
-        if (io.getNextId(buf) != 0L)
+        if (io.getNextId(buf) != 0L) // TODO may be this is ok to put in the middle?
             return false; // Splitted.
 
-        long dataPageId = dataPage.id();
+        long dataPageId = PageIO.getPageId(dataPageBuf);
 
-        int idx = io.addPage(buf, dataPageId);
-
-        if (idx == -1)
-            handlePageFull(pageId, page, buf, io, dataPage, dataPageBuf, bucket);
+        if (io.isFull(buf))
+            handlePageFull(pageId, page, buf, io, dataPageId, dataPage, dataPageBuf, bucket);
         else {
-            if (isWalDeltaRecordNeeded(wal, page))
+            if (isReuseBucket(bucket)) {
+                // Switch data page to an empty reuse page.
+                dataPageId = PageIdUtils.changeType(dataPageId, FLAG_IDX);
+
+                // TODO rotate ID
+
+                dataPage.fullPageWalRecordPolicy(FALSE); // Setting up as an empty index page.
+
+                if (needWalDeltaRecord(dataPage)) {
+                    wal.log(new InitNewPageRecord(cacheId, dataPage.id(),
+                        io.getType(), io.getVersion(), dataPageId));
+                }
+            }
+            else {
+                // Setup freeListPageId for data page.
+                DataPageIO dataIO = DataPageIO.VERSIONS.forPage(dataPageBuf);
+
+                dataIO.setFreeListPageId(dataPageBuf, pageId);
+
+                if (needWalDeltaRecord(dataPage))
+                    wal.log(new DataPageSetFreeListPageRecord(cacheId, dataPage.id(), pageId));
+            }
+
+            io.addPage(buf, dataPageId);
+
+            if (needWalDeltaRecord(page))
                 wal.log(new PagesListAddPageRecord(cacheId, pageId, dataPageId));
-
-            DataPageIO dataIO = DataPageIO.VERSIONS.forPage(dataPageBuf);
-            dataIO.setFreeListPageId(dataPageBuf, pageId);
-
-            if (isWalDeltaRecordNeeded(wal, dataPage))
-                wal.log(new DataPageSetFreeListPageRecord(cacheId, dataPage.id(), pageId));
         }
 
         return true;
@@ -595,27 +617,28 @@ public abstract class PagesList extends DataStructure {
         Page page,
         ByteBuffer buf,
         PagesListNodeIO io,
+        long dataPageId,
         Page dataPage,
         ByteBuffer dataPageBuf,
         int bucket
     ) throws IgniteCheckedException {
-        long dataPageId = dataPage.id();
         DataPageIO dataIO = DataPageIO.VERSIONS.forPage(dataPageBuf);
 
-        // Attempt to add page failed: the node page is full.
+        // If we are on the reuse bucket, we can not allocate new page, because it may cause a deadlock.
         if (isReuseBucket(bucket)) {
-            // If we are on the reuse bucket, we can not allocate new page, because it may cause deadlock.
             assert dataIO.isEmpty(dataPageBuf); // We can put only empty data pages to reuse bucket.
 
             // Change page type to index and add it as next node page to this list.
             dataPageId = PageIdUtils.changeType(dataPageId, FLAG_IDX);
 
+            // TODO rotate ID
+
             setupNextPage(io, pageId, buf, dataPageId, dataPageBuf);
 
-            if (isWalDeltaRecordNeeded(wal, page))
+            if (needWalDeltaRecord(page))
                 wal.log(new PagesListSetNextRecord(cacheId, pageId, dataPageId));
 
-            if (isWalDeltaRecordNeeded(wal, dataPage))
+            if (needWalDeltaRecord(dataPage))
                 wal.log(new PagesListInitNewPageRecord(
                     cacheId,
                     dataPageId,
@@ -638,15 +661,15 @@ public abstract class PagesList extends DataStructure {
                 try {
                     setupNextPage(io, pageId, buf, nextId, nextBuf);
 
-                    if (isWalDeltaRecordNeeded(wal, page))
+                    if (needWalDeltaRecord(page))
                         wal.log(new PagesListSetNextRecord(cacheId, pageId, nextId));
 
-                    int idx = io.addPage(nextBuf, dataPageId);
+                    io.addPage(nextBuf, dataPageId);
 
                     // Here we should never write full page, because it is known to be new.
                     next.fullPageWalRecordPolicy(FALSE);
 
-                    if (isWalDeltaRecordNeeded(wal, next))
+                    if (needWalDeltaRecord(next))
                         wal.log(new PagesListInitNewPageRecord(
                             cacheId,
                             nextId,
@@ -657,11 +680,9 @@ public abstract class PagesList extends DataStructure {
                             dataPageId
                         ));
 
-                    assert idx != -1;
-
                     dataIO.setFreeListPageId(dataPageBuf, nextId);
 
-                    if (isWalDeltaRecordNeeded(wal, dataPage))
+                    if (needWalDeltaRecord(dataPage))
                         wal.log(new DataPageSetFreeListPageRecord(cacheId, dataPageId, nextId));
 
                     updateTail(bucket, pageId, nextId);
@@ -704,9 +725,7 @@ public abstract class PagesList extends DataStructure {
 
         try {
             while ((nextId = bag.pollPage()) != 0L) {
-                int idx = io.addPage(prevBuf, nextId);
-
-                if (idx == -1) { // Attempt to add page failed: the node page is full.
+                if (io.isFull(prevBuf)) {
                     try (Page next = page(nextId)) {
                         ByteBuffer nextBuf = writeLock(next); // Page from reuse bag can't be concurrently recycled.
 
@@ -722,13 +741,13 @@ public abstract class PagesList extends DataStructure {
 
                         setupNextPage(io, prevId, prevBuf, nextId, nextBuf);
 
-                        if (isWalDeltaRecordNeeded(wal, page))
+                        if (needWalDeltaRecord(page))
                             wal.log(new PagesListSetNextRecord(cacheId, pageId, nextId));
 
                         // Here we should never write full page, because it is known to be new.
                         next.fullPageWalRecordPolicy(FALSE);
 
-                        if (isWalDeltaRecordNeeded(wal, next))
+                        if (needWalDeltaRecord(next))
                             wal.log(new PagesListInitNewPageRecord(
                                 cacheId,
                                 nextId,
@@ -747,8 +766,10 @@ public abstract class PagesList extends DataStructure {
                     }
                 }
                 else {
+                    io.addPage(prevBuf, nextId);
+
                     // TODO: use a single WAL record for multiple pages from bag?
-                    if (isWalDeltaRecordNeeded(wal, page))
+                    if (needWalDeltaRecord(page))
                         wal.log(new PagesListAddPageRecord(cacheId, pageId, nextId));
                 }
             }
@@ -842,7 +863,7 @@ public abstract class PagesList extends DataStructure {
                     long pageId = io.takeAnyPage(tailBuf);
 
                     if (pageId != 0L) {
-                        if (isWalDeltaRecordNeeded(wal, tail))
+                        if (needWalDeltaRecord(tail))
                             wal.log(new PagesListRemovePageRecord(cacheId, tailId, pageId));
 
                         dirty = true;
@@ -865,11 +886,13 @@ public abstract class PagesList extends DataStructure {
                             // Setting up a new data page.
                             tailId = PageIdUtils.changeType(tailId, FLAG_DATA);
 
+                            // TODO rotate ID
+
                             PageIO initIo = DataPageIO.VERSIONS.latest();
 
                             initIo.initNewPage(tailBuf, tailId);
 
-                            if (isWalDeltaRecordNeeded(wal, tail)) {
+                            if (needWalDeltaRecord(tail)) {
                                 wal.log(new InitNewPageRecord(cacheId, tail.id(), initIo.getType(),
                                     initIo.getVersion(), tailId));
                             }
@@ -880,7 +903,7 @@ public abstract class PagesList extends DataStructure {
 
                             PageIO.setPageId(tailBuf, tailId);
 
-                            if (isWalDeltaRecordNeeded(wal, tail))
+                            if (needWalDeltaRecord(tail))
                                 wal.log(new RecycleRecord(cacheId, tail.id(), tailId));
                         }
 
@@ -939,13 +962,13 @@ public abstract class PagesList extends DataStructure {
                 if (!rmvd)
                     return false;
 
-                if (isWalDeltaRecordNeeded(wal, page))
+                if (needWalDeltaRecord(page))
                     wal.log(new PagesListRemovePageRecord(cacheId, pageId, dataPageId));
 
                 // Reset free list page ID.
                 dataIO.setFreeListPageId(dataPageBuf, 0L);
 
-                if (isWalDeltaRecordNeeded(wal, dataPage))
+                if (needWalDeltaRecord(dataPage))
                     wal.log(new DataPageSetFreeListPageRecord(cacheId, dataPageId, 0L));
 
                 if (!io.isEmpty(buf))
@@ -1096,7 +1119,7 @@ public abstract class PagesList extends DataStructure {
                 PagesListNodeIO nextIO = PagesListNodeIO.VERSIONS.forPage(nextBuf);
                 nextIO.setPreviousId(nextBuf, 0);
 
-                if (isWalDeltaRecordNeeded(wal, next))
+                if (needWalDeltaRecord(next))
                     wal.log(new PagesListSetPreviousRecord(cacheId, nextId, 0L));
             }
             else // Do a fair merge: link previous and next to each other.
@@ -1120,8 +1143,8 @@ public abstract class PagesList extends DataStructure {
         long pageId,
         long nextId,
         Page next,
-        ByteBuffer nextBuf)
-        throws IgniteCheckedException {
+        ByteBuffer nextBuf
+    ) throws IgniteCheckedException {
         try (Page prev = page(prevId)) {
             ByteBuffer prevBuf = writeLock(prev); // No check, we keep a reference.
 
@@ -1137,36 +1160,18 @@ public abstract class PagesList extends DataStructure {
 
                 prevIO.setNextId(prevBuf, nextId);
 
-                if (isWalDeltaRecordNeeded(wal, prev))
+                if (needWalDeltaRecord(prev))
                     wal.log(new PagesListSetNextRecord(cacheId, prevId, nextId));
 
                 nextIO.setPreviousId(nextBuf, prevId);
 
-                if (isWalDeltaRecordNeeded(wal, next))
+                if (needWalDeltaRecord(next))
                     wal.log(new PagesListSetPreviousRecord(cacheId, nextId, prevId));
             }
             finally {
                 writeUnlock(prev, prevBuf, true);
             }
         }
-    }
-
-    /**
-     * @param page Page.
-     * @param pageId Page ID.
-     * @param buf Byte buffer.
-     * @return Rotated page ID.
-     * @throws IgniteCheckedException If failed.
-     */
-    private long recyclePage(long pageId, Page page, ByteBuffer buf) throws IgniteCheckedException {
-        pageId = PageIdUtils.rotatePageId(pageId);
-
-        PageIO.setPageId(buf, pageId);
-
-        if (isWalDeltaRecordNeeded(wal, page))
-            wal.log(new RecycleRecord(cacheId, page.id(), pageId));
-
-        return pageId;
     }
 
     /**

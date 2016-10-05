@@ -37,6 +37,10 @@ import org.apache.ignite.internal.processors.cache.database.tree.reuse.ReuseList
 import org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler;
 import org.apache.ignite.internal.util.typedef.internal.U;
 
+import static java.lang.Boolean.FALSE;
+import static java.lang.Boolean.TRUE;
+import static org.apache.ignite.internal.pagemem.PageIdUtils.itemId;
+import static org.apache.ignite.internal.pagemem.PageIdUtils.pageId;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.isWalDeltaRecordNeeded;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.writePage;
 
@@ -69,7 +73,7 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
     private final AtomicReferenceArray<Stripe[]> buckets = new AtomicReferenceArray<>(BUCKETS);
 
     /** */
-    private final int MIN_SIZE_FOR_BUCKET;
+    private final int maxFreeSpace;
 
     /** */
     private final PageHandler<CacheDataRow, Integer> writeRow =
@@ -91,8 +95,8 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
                 // Reread free space after update.
                 int newFreeSpace = io.getFreeSpace(buf);
 
-                if (newFreeSpace > MIN_PAGE_FREE_SPACE) {
-                    int bucket = bucket(newFreeSpace, false);
+                if (isEnoughToStore(newFreeSpace)) {
+                    int bucket = bucket(newFreeSpace, FALSE); // The page is not empty after insert, no reuse bucket.
 
                     put(null, page, buf, bucket);
                 }
@@ -109,7 +113,9 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
             DataPageIO io = (DataPageIO)iox;
 
             int oldFreeSpace = io.getFreeSpace(buf);
+            int oldBucket = isEnoughToStore(oldFreeSpace) ? bucket(oldFreeSpace, FALSE) : -1;
 
+            assert !io.isEmpty(buf);
             assert oldFreeSpace >= 0: oldFreeSpace;
 
             long nextLink = io.removeRow(buf, itemId);
@@ -117,30 +123,15 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
             if (isWalDeltaRecordNeeded(wal, page))
                 wal.log(new DataPageRemoveRecord(cacheId, page.id(), itemId));
 
-            // TODO: properly handle reuse bucket.
-//            if (io.isEmpty(buf)) {
-//                int oldBucket = oldFreeSpace > MIN_PAGE_FREE_SPACE ? bucket(oldFreeSpace, false) : -1;
-//
-//                if (oldBucket == -1 || removeDataPage(page, buf, io, oldBucket))
-//                    put(null, page, buf, REUSE_BUCKET);
-//            }
-
             int newFreeSpace = io.getFreeSpace(buf);
+            int newBucket = isEnoughToStore(newFreeSpace) ? bucket(newFreeSpace, io.isEmpty(buf)) : -1;
 
-            if (newFreeSpace > MIN_PAGE_FREE_SPACE) {
-                int newBucket = bucket(newFreeSpace, false);
-
-                if (oldFreeSpace > MIN_PAGE_FREE_SPACE) {
-                    int oldBucket = bucket(oldFreeSpace, false);
-
-                    if (oldBucket != newBucket) {
-                        // It is possible that page was concurrently taken for put,
-                        // in this case put will handle bucket change.
-                        if (removeDataPage(page, buf, io, oldBucket))
-                            put(null, page, buf, newBucket);
-                    }
-                }
-                else
+            // We are going to change bucket for new free space.
+            if (newBucket != oldBucket && newBucket != -1) {
+                // It is possible that page was concurrently taken for row insertion,
+                // in this case removeDataPage will fail and the bucket change
+                // will be handled by the insert operation.
+                if (oldBucket == -1 || removeDataPage(page, buf, io, oldBucket))
                     put(null, page, buf, newBucket);
             }
 
@@ -178,7 +169,7 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
         assert U.isPow2(BUCKETS);
         assert BUCKETS <= pageSize : pageSize;
 
-        MIN_SIZE_FOR_BUCKET = pageSize - 1;
+        maxFreeSpace = pageSize - 1;
 
         int shift = 0;
 
@@ -193,18 +184,32 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
     }
 
     /**
+     * It does not make sense to store pages with no free space in free list,
+     * because we will be just a waste of space and cpu cycles.
+     *
+     * @param freeSpace Free space.
+     * @return {@code true} If this free space is big enough to store the data page in the free list.
+     */
+    private static boolean isEnoughToStore(int freeSpace) {
+        return freeSpace > MIN_PAGE_FREE_SPACE;
+    }
+
+    /**
      * @param freeSpace Page free space.
-     * @param allowReuse {@code True} if it is allowed to get reuse bucket.
+     * @param reuse If we want to take an empty page from reuse bucket or want to prohibit reuse bucket usage.
      * @return Bucket.
      */
-    private int bucket(int freeSpace, boolean allowReuse) {
+    private int bucket(int freeSpace, Boolean reuse) {
         assert freeSpace > 0 : freeSpace;
+
+        if (reuse == TRUE)
+            return REUSE_BUCKET;
 
         int bucket = freeSpace >>> shift;
 
         assert bucket >= 0 && bucket < BUCKETS : bucket;
 
-        if (!allowReuse && isReuseBucket(bucket))
+        if (reuse == FALSE && isReuseBucket(bucket))
             bucket--;
 
         return bucket;
@@ -231,29 +236,39 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
         int written = 0;
 
         do {
-            int freeSpace = Math.min(MIN_SIZE_FOR_BUCKET, rowSize - written);
+            // Required free space on a page to store remaining part of the row.
+            int freeSpace = rowSize - written;
 
-            int bucket = bucket(freeSpace, false);
+            // If the row is too big to fit in a page, we'll ask for an empty page
+            // from reuse bucket for a row fragment. If not we still can end up with reuse bucket.
+            int bucket = freeSpace > maxFreeSpace ? REUSE_BUCKET : bucket(freeSpace, null);
 
-            long pageId = 0;
-            boolean reuseBucket = false;
+            long pageId = 0L;
 
-            // TODO: properly handle reuse bucket.
-            for (int b = bucket; b < BUCKETS - 1; b++) {
-                pageId = pollPageFromBucket(b, true);
+            while (bucket < BUCKETS) {
+                pageId = pollPageFromBucket(bucket, true);
 
-                if (pageId != 0L) {
-                    reuseBucket = isReuseBucket(b);
-
+                if (pageId != 0L)
                     break;
-                }
+
+                bucket++;
             }
 
-            try (Page page = pageId == 0 ? allocateDataPage(row.partition()) : pageMem.page(cacheId, pageId)) {
-                // If it is an existing page, we do not need to initialize it.
-                DataPageIO init = reuseBucket || pageId == 0L ? DataPageIO.VERSIONS.latest() : null;
+            try (Page page = pageId == 0L ?
+                allocateDataPage(row.partition()) : pageMem.page(cacheId, pageId)) {
+                // If it is an existing data page (not from reuse bucket), we do not need to initialize it.
+                DataPageIO init = isReuseBucket(bucket) || pageId == 0L ? DataPageIO.VERSIONS.latest() : null;
 
-                written = writePage(page, this, writeRow, init, wal, row, written, FAIL_I);
+                if (pageId == 0L)
+                    pageId = page.id(); // Newly allocated.
+                else if (isReuseBucket(bucket)) {
+                    // From reuse bucket we always allocate index page. Need to convert it to data page.
+                    int reuseId = itemId(pageId);
+
+                    pageId = pageId(pageId); // Mask the reuse ID.
+                }
+
+                written = writePage(pageId, page, this, writeRow, init, wal, row, written, FAIL_I);
 
                 assert written != FAIL_I; // We can't fail here.
             }

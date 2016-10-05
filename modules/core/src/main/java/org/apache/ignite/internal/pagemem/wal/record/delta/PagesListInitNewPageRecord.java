@@ -81,9 +81,9 @@ public class PagesListInitNewPageRecord extends InitNewPageRecord {
         io.setPreviousId(buf, prevPageId);
 
         if (addDataPageId != 0L) {
-            int cnt = io.addPage(buf, addDataPageId);
+            io.addPage(buf, addDataPageId);
 
-            assert cnt == 0 : cnt;
+            assert io.getCount(buf) == 1;
         }
     }
 

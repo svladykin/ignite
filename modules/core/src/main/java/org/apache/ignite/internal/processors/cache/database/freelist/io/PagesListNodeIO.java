@@ -159,22 +159,26 @@ public class PagesListNodeIO extends PageIO {
     }
 
     /**
+     * @param buf Buffer.
+     * @return {@code true} If the page is full.
+     */
+    public boolean isFull(ByteBuffer buf) {
+        return getCount(buf) == getCapacity(buf);
+    }
+
+    /**
      * Adds page to the end of pages list.
      *
      * @param buf Page buffer.
      * @param pageId Page ID.
-     * @return Total number of items in this page.
      */
-    public int addPage(ByteBuffer buf, long pageId) {
+    public void addPage(ByteBuffer buf, long pageId) {
+        assert !isFull(buf);
+
         int cnt = getCount(buf);
 
-        if (cnt == getCapacity(buf))
-            return -1;
-
-        setAt(buf, cnt, pageId);
         setCount(buf, cnt + 1);
-
-        return cnt;
+        setAt(buf, cnt, pageId);
     }
 
     /**

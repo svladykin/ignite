@@ -49,7 +49,7 @@ public class ReuseListSelfTest extends GridCommonAbstractTest {
     protected static final int CACHE_ID = 100500;
 
     /** */
-    private PageMemory pageMem;
+    protected PageMemory pageMem;
 
     /** */
     protected ReuseList reuseList;
