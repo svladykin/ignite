@@ -115,6 +115,8 @@ public abstract class DataStructure implements PageLockListener {
 
         if (pageId == 0L)
             pageId = allocatePageNoReuse();
+        else
+            assert PageIdUtils.itemId(pageId) != 0; // Recycled page is always index.
 
         assert pageId != 0;
 
@@ -126,7 +128,11 @@ public abstract class DataStructure implements PageLockListener {
      * @throws IgniteCheckedException If failed.
      */
     protected long allocatePageNoReuse() throws IgniteCheckedException {
-        return pageMem.allocatePage(cacheId, PageIdAllocator.INDEX_PARTITION, FLAG_IDX);
+        long pageId = pageMem.allocatePage(cacheId, PageIdAllocator.INDEX_PARTITION, FLAG_IDX);
+
+        assert PageIdUtils.itemId(pageId) == 0; // No rotate ID initially.
+
+        return pageId;
     }
 
     /**

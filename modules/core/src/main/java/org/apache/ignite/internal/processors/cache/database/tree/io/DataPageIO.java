@@ -63,7 +63,10 @@ public class DataPageIO extends PageIO {
     private static final int FIRST_ENTRY_OFF = INDIRECT_CNT_OFF + 1;
 
     /** */
-    private static final int ITEMS_OFF = FIRST_ENTRY_OFF + 2;
+    private static final int RECYCLE_ID_OFF = FIRST_ENTRY_OFF + 2;
+
+    /** */
+    private static final int ITEMS_OFF = RECYCLE_ID_OFF + 1;
 
     /** */
     private static final int ITEM_SIZE = 2;
@@ -86,10 +89,34 @@ public class DataPageIO extends PageIO {
 
     /** {@inheritDoc} */
     @Override public void initNewPage(ByteBuffer buf, long pageId) {
+        int recycleId = PageIdUtils.itemId(pageId);
+
+        if (recycleId != 0) // Data page ID must always have recycle ID == 0, thus masking it.
+            pageId = PageIdUtils.pageId(pageId);
+
         super.initNewPage(buf, pageId);
 
         setEmptyPage(buf);
         setFreeListPageId(buf, 0L);
+        setRecycleId(buf, recycleId);
+    }
+
+    /**
+     * @param buf Page buffer.
+     * @param recycleId Recycle ID.
+     */
+    private void setRecycleId(ByteBuffer buf, int recycleId) {
+        assert recycleId >= 0 && recycleId <= 0xFF;
+
+        buf.put(RECYCLE_ID_OFF, (byte)recycleId);
+    }
+
+    /**
+     * @param buf Page buffer.
+     * @return Recycle ID.
+     */
+    private int getRecycleId(ByteBuffer buf) {
+        return buf.get(RECYCLE_ID_OFF) & 0xFF;
     }
 
     /**

@@ -40,7 +40,6 @@ import org.apache.ignite.internal.util.typedef.internal.U;
 import static java.lang.Boolean.FALSE;
 import static java.lang.Boolean.TRUE;
 import static org.apache.ignite.internal.pagemem.PageIdUtils.itemId;
-import static org.apache.ignite.internal.pagemem.PageIdUtils.pageId;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.isWalDeltaRecordNeeded;
 import static org.apache.ignite.internal.processors.cache.database.tree.util.PageHandler.writePage;
 
@@ -259,13 +258,10 @@ public class FreeListImpl extends PagesList implements FreeList, ReuseList {
                 // If it is an existing data page (not from reuse bucket), we do not need to initialize it.
                 DataPageIO init = isReuseBucket(bucket) || pageId == 0L ? DataPageIO.VERSIONS.latest() : null;
 
-                if (pageId == 0L)
+                if (pageId == 0L) {
                     pageId = page.id(); // Newly allocated.
-                else if (isReuseBucket(bucket)) {
-                    // From reuse bucket we always allocate index page. Need to convert it to data page.
-                    int reuseId = itemId(pageId);
 
-                    pageId = pageId(pageId); // Mask the reuse ID.
+                    assert itemId(pageId) == 0;
                 }
 
                 written = writePage(pageId, page, this, writeRow, init, wal, row, written, FAIL_I);

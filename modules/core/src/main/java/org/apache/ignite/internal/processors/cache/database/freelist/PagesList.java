@@ -568,7 +568,7 @@ public abstract class PagesList extends DataStructure {
         long dataPageId = PageIO.getPageId(dataPageBuf);
 
         if (io.isFull(buf))
-            handlePageFull(pageId, page, buf, io, dataPageId, dataPage, dataPageBuf, bucket);
+            putDataPageNodeFull(pageId, page, buf, io, dataPageId, dataPage, dataPageBuf, bucket);
         else {
             if (isReuseBucket(bucket)) {
                 // Switch data page to an empty reuse page.
@@ -612,7 +612,7 @@ public abstract class PagesList extends DataStructure {
      * @param bucket Bucket index.
      * @throws IgniteCheckedException If failed.
      */
-    private void handlePageFull(
+    private void putDataPageNodeFull(
         long pageId,
         Page page,
         ByteBuffer buf,
@@ -650,7 +650,10 @@ public abstract class PagesList extends DataStructure {
             updateTail(bucket, pageId, dataPageId);
         }
         else {
-            // Just allocate a new node page and add our data page there.
+            // It is a usual bucket with non-empty pages, we should not modify the given data page.
+            assert !dataIO.isEmpty(dataPageBuf); // We should not put empty data pages into usual bucket.
+
+            // Just allocate a new node page and add our data page ID there.
             long nextId = allocatePage();
 
             try (Page next = page(nextId)) {
