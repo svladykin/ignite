@@ -26,7 +26,7 @@ import org.apache.ignite.lang.IgniteInClosure;
 /**
  * Abstract IO routines for B+Tree pages.
  */
-public abstract class BPlusIO<L> extends PageIO {
+public abstract class BPlusIO<L> extends PageIO implements BPlusIOInterface {
     /** */
     private static final int CNT_OFF = COMMON_HEADER_END;
 
@@ -65,10 +65,8 @@ public abstract class BPlusIO<L> extends PageIO {
         this.itemSize = itemSize;
     }
 
-    /**
-     * @return Item size in bytes.
-     */
-    public final int getItemSize() {
+    /** {@inheritDoc} */
+    @Override public final int getItemSize() {
         return itemSize;
     }
 
@@ -117,11 +115,8 @@ public abstract class BPlusIO<L> extends PageIO {
         assert getRemoveId(pageAddr) == rmvId;
     }
 
-    /**
-     * @param pageAddr Page address.
-     * @return Items count in the page.
-     */
-    public final int getCount(long pageAddr) {
+    /** {@inheritDoc} */
+    @Override public final int getCount(long pageAddr) {
         int cnt = PageUtils.getShort(pageAddr, CNT_OFF) & 0xFFFF;
 
         assert cnt >= 0: cnt;
@@ -141,28 +136,15 @@ public abstract class BPlusIO<L> extends PageIO {
         assert getCount(pageAddr) == cnt;
     }
 
-    /**
-     * @return {@code true} If we can get the full row from this page using
-     * method {@link BPlusTree#getRow(BPlusIO, long, int)}.
-     * Must always be {@code true} for leaf pages.
-     */
-    public final boolean canGetRow() {
+    /** {@inheritDoc} */
+    @Override public final boolean canGetRow() {
         return canGetRow;
     }
 
-    /**
-     * @return {@code true} if it is a leaf page.
-     */
-    public final boolean isLeaf() {
+    /** {@inheritDoc} */
+    @Override public final boolean isLeaf() {
         return leaf;
     }
-
-    /**
-     * @param pageAddr Page address.
-     * @param pageSize Page size.
-     * @return Max items count.
-     */
-    public abstract int getMaxCount(long pageAddr, int pageSize);
 
     /**
      * Store the needed info about the row in the page. Leaf and inner pages can store different info.
@@ -190,12 +172,6 @@ public abstract class BPlusIO<L> extends PageIO {
 
         return rowBytes;
     }
-
-    /**
-     * @param idx Index of element.
-     * @return Offset from byte buffer begin in bytes.
-     */
-    public abstract int offset(int idx);
 
     /**
      * Store the needed info about the row in the page. Leaf and inner pages can store different info.
@@ -230,21 +206,6 @@ public abstract class BPlusIO<L> extends PageIO {
      * @throws IgniteCheckedException If failed.
      */
     public abstract L getLookupRow(BPlusTree<L, ?> tree, long pageAddr, int idx) throws IgniteCheckedException;
-
-    /**
-     * Copy items from source page to destination page.
-     * Both pages must be of the same type and the same version.
-     *
-     * @param srcPageAddr Source page address.
-     * @param dstPageAddr Destination page address.
-     * @param srcIdx Source begin index.
-     * @param dstIdx Destination begin index.
-     * @param cnt Items count.
-     * @param cpLeft Copy leftmost link (makes sense only for inner pages).
-     * @throws IgniteCheckedException If failed.
-     */
-    public abstract void copyItems(long srcPageAddr, long dstPageAddr, int srcIdx, int dstIdx, int cnt, boolean cpLeft)
-        throws IgniteCheckedException;
 
     // Methods for B+Tree logic.
 

@@ -87,6 +87,12 @@ public abstract class PageIO {
     /** */
     private static IOVersions<? extends BPlusLeafIO<?>> h2LeafIOs;
 
+    /** */
+    private static IOVersions<? extends BPlusInnerIO<?>> blockchainInnerIOs;
+
+    /** */
+    private static IOVersions<? extends BPlusLeafIO<?>> blockchainLeafIOs;
+
     /** Maximum payload size. */
     public static final short MAX_PAYLOAD_SIZE = 2048;
 
@@ -370,6 +376,20 @@ public abstract class PageIO {
     ) {
         h2InnerIOs = innerIOs;
         h2LeafIOs = leafIOs;
+    }
+
+    /**
+     * Registers this B+Tree IO versions for blockchain.
+     *
+     * @param innerIOs Inner IO versions.
+     * @param leafIOs Leaf IO versions.
+     */
+    public static void registerBlockchain(
+        IOVersions<? extends BPlusInnerIO<?>> innerIOs,
+        IOVersions<? extends BPlusLeafIO<?>> leafIOs
+    ) {
+        blockchainInnerIOs = innerIOs;
+        blockchainLeafIOs = leafIOs;
     }
 
     /**
