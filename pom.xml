@@ -123,7 +123,6 @@
             <modules><!-- sorted alphabetically -->
                 <module>modules/scalar-2.10</module>
                 <module>modules/scalar</module>
-                <module>modules/spark-2.10</module>
                 <module>modules/spark</module>
                 <module>modules/visor-console-2.10</module>
                 <module>modules/visor-console</module>
@@ -556,7 +555,6 @@
 
             <modules>
                 <module>modules/scalar-2.10</module>
-                <module>modules/spark-2.10</module>
                 <module>modules/visor-console-2.10</module>
                 <module>modules/visor-plugins</module>
             </modules>
@@ -610,6 +608,13 @@
             <modules>
                 <module>modules/web-console</module>
                 <module>modules/web-console/web-agent</module>
+            </modules>
+        </profile>
+
+        <profile>
+            <id>tensorflow</id>
+            <modules>
+                <module>modules/tensorflow</module>
             </modules>
         </profile>
 
